@@ -24,20 +24,28 @@ float* readDataFromFile(const char* filename, int& size) {
     file.close();
     return data;
 }
-void FLOAT2INT(vfloat32m4_t f, vfloat32m4_t rf, vuint32m4_t fint, int _vl)
+void FLOAT2INT(vfloat32m4_t& f, vfloat32m4_t& rf, vint32m4_t& fint, int _vl)
 {
     vfloat32m4_t tmp = vfadd_vf_f32m4(f, 12582912.0f, _vl);
     rf = vfsub_vf_f32m4(tmp, 12582912.0f, _vl);
-    fint = vreinterpret_v_f32m4_u32m4(tmp);
+    fint = vreinterpret_v_f32m4_i32m4(tmp);
 
-    fint = vand_vx_u32m4(fint, 0xFFFF, _vl);
+   // fint = vand_vx_i32m4(fint, 0xFFFF, _vl);
+   //d = d & 0x00000000ffffffff; - это наверное уже есть
+//d = d | ((d&0x0000000080000000)*0x00000001fffffffe);
+    fint = vand_vx_i32m4(fint, 0x0000ffff, _vl);
+    vint32m4_t finttmp = vand_vx_i32m4(fint, 0x00008000, _vl);
+    finttmp = vmul_vx_i32m4(finttmp, 0x0001ffff, _vl);
+	fint = vor_vv_i32m4(fint, finttmp, _vl);
+
+
 }
 
 
 
 vfloat32m4_t my_exp0(vfloat32m4_t x, int vl) {
     vfloat32m4_t y, kf;
-    vuint32m4_t ki;
+    vint32m4_t ki;
 
 
     float Log2 = (float)0x1.62e43p-1;
@@ -48,6 +56,13 @@ vfloat32m4_t my_exp0(vfloat32m4_t x, int vl) {
     // Here should be the tests for exceptional cases
     vfloat32m4_t x_mult_InvLog2 = vfmul_vf_f32m4(x, InvLog2, vl);
     FLOAT2INT(x_mult_InvLog2, kf, ki, vl);
+	int* kmas= new int[16];
+vse_v_i32m4(kmas, ki, vl);
+		for (int i = 0; i < vl; i++)
+		{
+			std::cout<< "k"<<i<<"="<< kmas[i]<< "";
+		}
+		ki = vle_v_i32m4(kmas, vl);
 
     //y = (x - kf*Log2h) - kf*Log2l;
     vfloat32m4_t kf_mult_Log2h = vfmul_vf_f32m4(kf, Log2h, vl);
@@ -77,27 +92,20 @@ vfloat32m4_t my_exp0(vfloat32m4_t x, int vl) {
                         + y *  (float)0x1.6850e4p-10)))));*/
 
                         //  r.i16[HI] += k << 7; //Exponent update
-    vuint32m4_t resint = vreinterpret_v_f32m4_u32m4(result);
+    vint32m4_t resint = vreinterpret_v_f32m4_i32m4(result);
+	ki = vsll_vx_i32m4(ki,23,vl);
+	resint = vadd_vv_i32m4(resint,ki,vl);
+     vfloat32m4_t exp_vect = vreinterpret_v_i32m4_f32m4(resint);
 
-    vuint32m4_t tmp_exp = vand_vx_u32m4(resint, 0x7F800000u, vl);
-    vuint32m4_t tmp_exp_srl = vsrl_vx_u32m4(tmp_exp, 23, vl);
-
-    tmp_exp_srl = vadd_vv_u32m4(tmp_exp_srl, ki, vl); 
-    vuint32m4_t tmp_exp_sll = vsll_vx_u32m4(tmp_exp_srl, 23, vl);
-    vuint32m4_t resint_and_mas = vand_vx_u32m4(resint, 0x807FFFFFu, vl);
-    resint = vor_vv_u32m4(resint_and_mas, tmp_exp_sll, vl);
-
-    // vfloat32m4_t exp_vect = vreinterpret_v_u32m4_f32m4(resint);
-
-     //return exp_vect;
-    return result;
+     return exp_vect;
+    //return result;
 }
 
 int main() 
 {
 
     std::default_random_engine rd(0);//генератор случайных чисел
-    std::uniform_real_distribution<float> dist1(-5.0f, 10.0f);
+    std::uniform_real_distribution<float> dist1(0.1f, 10.0f);
     float* S0 = new float[16];
     float* my_exponent = new float[16];
     float* exponent = new float[16];
@@ -109,7 +117,7 @@ int main()
     }
 
     vfloat32m4_t so = vle_v_f32m4(S0, 16);
-    vfloat32m4_t exp_val = my_exp0(S0, 16);
+    vfloat32m4_t exp_val = my_exp0(so, 16);
     vse_v_f32m4(my_exponent, exp_val, 16);
 
     for (int i = 0; i < 16; i++)
@@ -120,10 +128,11 @@ int main()
     float max_diff = 0.0f;
     for (int i = 0; i < 16; i++)
     {
-        diff[i] = abs(my_exponent[i]-exponent[i]);
+        diff[i] = fabs(my_exponent[i]-exponent[i]);
         if (diff[i] > max_diff) max_diff = diff[i];
-        printf("x=%.12ef\nmy_exp=%.12ef\nexpf=%.12ef\ndiff=%i  max_diff=%i\n",
-            S0[i], my_exponent[i], exponent[i], diff[i], max_diff);
+        //printf("x=%.12ef\nmy_exp=%.12ef\nexpf=%.12ef\ndiff=%.12ef  max_diff=%.12ef\n",
+           std::cout <<"x= " << S0[i]<<" "<<"my_exp="<< my_exponent[i]<<" "<<"exp= " << exponent[i]<<std::endl;
+		  std::cout<<"diff= " << diff[i] << "   "<<"max_diff= " << max_diff <<std::endl;
     }
  
 
